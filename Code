@@ -1,0 +1,343 @@
+SELECT 
+customer_id,
+customer_city,
+customer_state
+FROM `e_commerce.customers`;
+
+##Time period for which the data is given:- "CHECK"
+
+SELECT
+MIN(order_purchase_timestamp)AS start_date,
+MAX(order_purchase_timestamp) AS end_date
+FROM `e_commerce.orders` ;
+
+##Cities and States of customers ordered during the given period
+
+SELECT
+o.customer_id,
+c.customer_city,
+c.customer_state
+FROM `e_commerce.orders` AS o
+LEFT JOIN
+`e_commerce.customers` AS c
+ON 
+o.customer_id = c.customer_id;
+
+##Is there a growing trend on e-commerce in Brazil? How can we describe a complete scenario? Can we see some seasonality with peaks at specific months?
+
+SELECT
+*
+FROM(
+SELECT
+EXTRACT (YEAR FROM order_purchase_timestamp) AS year,
+EXTRACT(QUARTER FROM order_purchase_timestamp) AS quarter,
+COUNT(order_id) AS no_of_orders
+FROM `e_commerce.orders`
+GROUP BY EXTRACT(QUARTER FROM order_purchase_timestamp),EXTRACT (YEAR FROM order_purchase_timestamp)
+)AS x
+ORDER BY x.year,x.quarter
+;
+##What time do Brazilian customers tend to buy (Dawn, Morning, Afternoon or Night)?
+
+SELECT
+x.day_timings,
+count(x.order_id) AS no_of_orders
+FROM(
+SELECT 
+order_id,
+EXTRACT (HOUR FROM order_purchase_timestamp) AS time,
+CASE
+WHEN EXTRACT (HOUR FROM order_purchase_timestamp) BETWEEN 5 AND 8 
+THEN "Dawn-From 5:00 to 8:00 "
+WHEN EXTRACT (HOUR FROM order_purchase_timestamp) BETWEEN 8 AND 12
+THEN "Morning-From 8:00 to 12:00 "
+WHEN EXTRACT (HOUR FROM order_purchase_timestamp) BETWEEN 12 AND 18
+THEN "Afternoon-From 12:00 to 18:00 "
+ELSE "Night-From 18:00 to 5:00  "
+END AS day_timings
+FROM `e_commerce.orders`
+)AS x
+GROUP BY x.day_timings
+ORDER BY x.day_timings
+;
+##Evolution of E-commerce orders in the Brazil region:-
+###a)get month on month by states
+
+SELECT
+CONCAT(x.month,"-",x.year)AS month_wise,
+x.customer_state,
+COUNT(DISTINCT x.order_id) AS no_of_orders
+FROM(
+SELECT
+EXTRACT(YEAR FROM o.order_purchase_timestamp) AS year,
+EXTRACT(MONTH FROM o.order_purchase_timestamp) AS month,
+o.customer_id,
+c.customer_state,
+o.order_id
+FROM `e_commerce.orders` AS o
+RIGHT JOIN
+`e_commerce.customers` AS c
+ON
+o.customer_id = c.customer_id
+) AS x
+GROUP BY x.customer_state,x.month,x.year
+ORDER BY x.year,x.month
+;
+
+###b)Distribution of customers across the states in Brazil
+
+SELECT
+c.customer_state AS Name_of_state,
+count(c.customer_id) AS number_of_customers
+FROM `e_commerce.orders` AS o
+LEFT JOIN
+`e_commerce.customers` AS c
+ON 
+o.customer_id = c.customer_id
+GROUP BY c.customer_state
+ORDER BY count(c.customer_id) DESC 
+;
+--Impact on Economy: Analyze the money movement by e-commerce by looking at order prices, freight and others.
+--a)1.	Get % increase in cost of orders from 2017 to 2018 (include months between Jan to Aug only) - You can use “payment_value” column in payments table
+SELECT
+*
+FROM(
+  SELECT
+  o.order_id,
+  p.payment_value,
+  p.payment_value*2 AS Increased_payment_value,
+  EXTRACT(YEAR FROM o.order_purchase_timestamp) AS year,
+  EXTRACT(MONTH FROM o.order_purchase_timestamp) AS month,
+  FROM `e_commerce.orders` AS o
+  LEFT JOIN
+  `e_commerce.payments` AS p
+  ON 
+  o.order_id = p.order_id
+) AS x
+WHERE X.YEAR BETWEEN 2017 AND 2018 AND x.month BETWEEN 1 AND 7
+ORDER BY x.year,x.month
+;  
+## Mean & Sum of price and freight value by customer state
+SELECT
+x.customer_state,
+SUM(x.price) AS total_actualprice,
+SUM(x.freight_value) AS total_regionwise_price,
+AVG(x.price) AS average_actualprice,
+AVG(x.freight_value) AS avearage_regionwise_price
+FROM(
+SELECT
+c.customer_state,
+ot.price,
+ot.freight_value
+FROM `e_commerce.orders` AS o
+RIGHT JOIN
+`e_commerce.order_items` AS ot
+ON
+o.order_id = ot.order_id
+RIGHT JOIN
+`e_commerce.customers`AS c
+ON
+o.customer_id = c.customer_id
+) AS x
+GROUP BY x.customer_state
+ORDER BY x.customer_state
+;
+## Calculate days between purchasing, delivering and estimated delivery
+SELECT
+order_id,
+DATE_DIFF(order_delivered_customer_date,order_purchase_timestamp,DAY) AS time_to_delivery,
+DATE_DIFF(order_estimated_delivery_date,order_delivered_customer_date,DAY) AS diff_estimated_delivery,
+  CASE
+    WHEN DATE_DIFF(order_estimated_delivery_date,order_delivered_customer_date,DAY) > 0 THEN "the order_delivered early" 
+    WHEN DATE_DIFF(order_estimated_delivery_date,order_delivered_customer_date,DAY) < 0 THEN "the order_delivered delay"
+    WHEN DATE_DIFF(order_estimated_delivery_date,order_delivered_customer_date,DAY) = 0 THEN "the order_delivered exactly on estimated date"  
+    ELSE NULL
+  END AS status
+FROM `e_commerce.orders`;
+## Find time_to_delivery & diff_estimated_delivery. Formula for the same given below:
+###time_to_delivery = order_delivered_customer_date-order_purchase_timestamp
+###diff_estimated_delivery = order_estimated_delivery_date-order_delivered_customer_date
+###Group data by state, take mean of freight_value, time_to_delivery, diff_estimated_delivery
+SELECT
+c.customer_state,
+ROUND(AVG(ot.freight_value),2) AS avg_freight_value,
+ROUND(AVG(DATE_DIFF(o.order_delivered_customer_date,o.order_purchase_timestamp,DAY))) AS avg_time_to_delivery,
+ROUND(AVG(DATE_DIFF(o.order_estimated_delivery_date,o.order_delivered_customer_date,DAY))) AS avg_diff_estimated_delivery
+FROM `e_commerce.orders` AS o
+JOIN
+`e_commerce.order_items` AS ot
+ON o.order_id = ot.order_id
+JOIN 
+`e_commerce.customers` AS c
+ON o.customer_id = c.customer_id
+GROUP BY c.customer_state;
+##Top 5 states with highest/lowest average freight value - sort in desc/asc limit 5
+
+WITH top AS (SELECT
+c.customer_state,
+ROUND(AVG(ot.freight_value)) AS avg_freight_value
+FROM `e_commerce.orders` AS o
+JOIN
+`e_commerce.order_items` AS ot
+ON o.order_id = ot.order_id
+JOIN 
+`e_commerce.customers` AS c
+ON o.customer_id = c.customer_id
+GROUP BY c.customer_state
+ORDER BY AVG(ot.freight_value) DESC
+LIMIT 5),
+bottom AS (SELECT
+c.customer_state,
+ROUND(AVG(ot.freight_value)) AS avg_freight_value
+FROM `e_commerce.orders` AS o
+JOIN
+`e_commerce.order_items` AS ot
+ON o.order_id = ot.order_id
+JOIN 
+`e_commerce.customers` AS c
+ON o.customer_id = c.customer_id
+GROUP BY c.customer_state
+ORDER BY AVG(ot.freight_value) ASC
+LIMIT 5)
+SELECT
+customer_state,
+avg_freight_value
+FROM (
+  select customer_state, top.avg_freight_value
+  from top
+  union all
+  select customer_state, bottom.avg_freight_value
+  from bottom
+)
+ORDER BY avg_freight_value DESC;
+
+##Top 5 states with highest/lowest average time to delivery
+WITH highest AS (SELECT
+c.customer_state,
+ROUND(AVG(DATE_DIFF(o.order_delivered_customer_date,o.order_purchase_timestamp,DAY))) AS avg_time_to_delivery,
+FROM `e_commerce.orders` AS o
+JOIN
+`e_commerce.order_items` AS ot
+ON o.order_id = ot.order_id
+JOIN 
+`e_commerce.customers` AS c
+ON o.customer_id = c.customer_id
+GROUP BY c.customer_state
+ORDER BY ROUND(AVG(DATE_DIFF(o.order_delivered_customer_date,o.order_purchase_timestamp,DAY))) DESC
+LIMIT 5),
+lowest AS (SELECT
+c.customer_state,
+ROUND(AVG(DATE_DIFF(o.order_delivered_customer_date,o.order_purchase_timestamp,DAY))) AS avg_time_to_delivery,
+FROM `e_commerce.orders` AS o
+JOIN
+`e_commerce.order_items` AS ot
+ON o.order_id = ot.order_id
+JOIN 
+`e_commerce.customers` AS c
+ON o.customer_id = c.customer_id
+GROUP BY c.customer_state
+ORDER BY ROUND(AVG(DATE_DIFF(o.order_delivered_customer_date,o.order_purchase_timestamp,DAY))) ASC
+LIMIT 5)
+SELECT
+customer_state,
+avg_time_to_delivery
+FROM (
+  SELECT
+    customer_state,
+    highest.avg_time_to_delivery
+  FROM highest
+UNION ALL
+  SELECT
+    customer_state,
+    lowest.avg_time_to_delivery
+  FROM lowest
+)
+ORDER BY avg_time_to_delivery DESC;
+##Top 5 states where delivery is really fast/ not so fast compared to estimated date
+
+WITH highest AS (SELECT
+c.customer_state,
+ROUND(AVG(DATE_DIFF(o.order_estimated_delivery_date,o.order_delivered_customer_date,DAY))) AS avg_diff_estimated_delivery,
+FROM `e_commerce.orders` AS o
+JOIN
+`e_commerce.order_items` AS ot
+ON o.order_id = ot.order_id
+JOIN 
+`e_commerce.customers` AS c
+ON o.customer_id = c.customer_id
+GROUP BY c.customer_state
+ORDER BY ROUND(AVG(DATE_DIFF(o.order_estimated_delivery_date,o.order_delivered_customer_date,DAY))) DESC
+LIMIT 5
+),
+lowest AS (SELECT
+c.customer_state,
+ROUND(AVG(DATE_DIFF(o.order_estimated_delivery_date,o.order_delivered_customer_date,DAY))) AS avg_diff_estimated_delivery,
+FROM `e_commerce.orders` AS o
+JOIN
+`e_commerce.order_items` AS ot
+ON o.order_id = ot.order_id
+JOIN 
+`e_commerce.customers` AS c
+ON o.customer_id = c.customer_id
+GROUP BY c.customer_state
+ORDER BY ROUND(AVG(DATE_DIFF(o.order_estimated_delivery_date,o.order_delivered_customer_date,DAY))) ASC
+LIMIT 5)
+SELECT
+customer_state,
+avg_diff_estimated_delivery
+FROM (
+  SELECT
+    customer_state,
+    highest.avg_diff_estimated_delivery
+  FROM highest
+UNION ALL
+  SELECT
+    customer_state,
+    lowest.avg_diff_estimated_delivery
+  FROM lowest
+)
+ORDER BY avg_diff_estimated_delivery ASC;
+##Payment type analysis:
+###Month over Month count of orders for different payment types
+
+SELECT
+x.year_of_order,
+x.month_of_order,
+x.payment_type,
+x.count_of_orders
+FROM(
+SELECT
+p.payment_type,
+EXTRACT(MONTH FROM o.order_purchase_timestamp) AS month_of_order,
+EXTRACT (YEAR FROM o.order_purchase_timestamp) AS year_of_order,
+COUNT (DISTINCT p.order_id) AS count_of_orders
+FROM `e_commerce.payments` AS p
+JOIN
+`e_commerce.orders` AS o
+ON
+p.order_id = o.order_id
+GROUP BY p.payment_type,EXTRACT(MONTH FROM o.order_purchase_timestamp),EXTRACT (YEAR FROM o.order_purchase_timestamp)
+) AS x
+ORDER BY x.year_of_order,x.month_of_order;
+
+##Count of orders based on the no. of payment installments
+
+SELECT
+x.year_of_order,
+x.month_of_order,
+x.payment_installments,
+x.count_of_orders
+FROM(
+SELECT
+p.payment_installments,
+EXTRACT(MONTH FROM o.order_purchase_timestamp) AS month_of_order,
+EXTRACT (YEAR FROM o.order_purchase_timestamp) AS year_of_order,
+COUNT (DISTINCT p.order_id) AS count_of_orders
+FROM `e_commerce.payments` AS p
+JOIN
+`e_commerce.orders` AS o
+ON
+p.order_id = o.order_id
+GROUP BY p.payment_installments,EXTRACT(MONTH FROM o.order_purchase_timestamp),EXTRACT (YEAR FROM o.order_purchase_timestamp)
+) AS x
+ORDER BY x.year_of_order,x.month_of_order;
